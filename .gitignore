@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+.venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Data (keep folder structure placeholders)
+data/train/**
+data/val/**
+!data/train/**/.gitkeep
+!data/val/**/.gitkeep
+
+# Outputs
+runs/
+logs/
+*.pt
+*.pth
+
+# Local notes
+*.log
