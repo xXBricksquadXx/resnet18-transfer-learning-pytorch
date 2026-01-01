@@ -1,27 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import nullcontext
+from typing import Optional
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-from .utils import AverageMeter, accuracy_top1
 
 
-@dataclass(frozen=True)
+@dataclass
 class EpochResult:
     loss: float
     acc: float
 
 
-def _amp_autocast(device: torch.device, amp: bool):
-    if amp and device.type == "cuda":
-        return torch.cuda.amp.autocast()
-    # no-op context manager
-    from contextlib import nullcontext
-    return nullcontext()
+def _accuracy(logits: torch.Tensor, targets: torch.Tensor) -> float:
+    preds = logits.argmax(dim=1)
+    correct = (preds == targets).sum().item()
+    total = targets.numel()
+    return float(correct) / float(total) if total else 0.0
 
 
 def train_one_epoch(
@@ -34,23 +32,25 @@ def train_one_epoch(
 ) -> EpochResult:
     model.train()
 
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
+    use_amp = bool(amp and device.type == "cuda")
+    scaler: Optional[torch.amp.GradScaler] = torch.amp.GradScaler("cuda") if use_amp else None
+    autocast_ctx = torch.amp.autocast(device_type="cuda") if use_amp else nullcontext()
 
-    loss_meter = AverageMeter()
-    acc_meter = AverageMeter()
+    total_loss = 0.0
+    total_correct = 0
+    total_seen = 0
 
-    pbar = tqdm(loader, desc="train", leave=False)
-    for xb, yb in pbar:
-        xb = xb.to(device)
-        yb = yb.to(device)
+    for xb, yb in loader:
+        xb = xb.to(device, non_blocking=False)
+        yb = yb.to(device, non_blocking=False)
 
         optimizer.zero_grad(set_to_none=True)
 
-        with _amp_autocast(device, amp):
+        with autocast_ctx:
             logits = model(xb)
             loss = criterion(logits, yb)
 
-        if scaler.is_enabled():
+        if scaler is not None:
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -59,17 +59,16 @@ def train_one_epoch(
             optimizer.step()
 
         bs = yb.size(0)
-        acc = accuracy_top1(logits.detach(), yb)
+        total_loss += loss.item() * bs
+        total_correct += int((logits.argmax(dim=1) == yb).sum().item())
+        total_seen += int(bs)
 
-        loss_meter = loss_meter.update(float(loss.item()), bs)
-        acc_meter = acc_meter.update(acc, bs)
-
-        pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", acc=f"{acc_meter.avg:.4f}")
-
-    return EpochResult(loss=loss_meter.avg, acc=acc_meter.avg)
+    avg_loss = total_loss / total_seen if total_seen else 0.0
+    avg_acc = total_correct / total_seen if total_seen else 0.0
+    return EpochResult(loss=float(avg_loss), acc=float(avg_acc))
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate(
     model: nn.Module,
     loader: DataLoader,
@@ -78,23 +77,22 @@ def evaluate(
 ) -> EpochResult:
     model.eval()
 
-    loss_meter = AverageMeter()
-    acc_meter = AverageMeter()
+    total_loss = 0.0
+    total_correct = 0
+    total_seen = 0
 
-    pbar = tqdm(loader, desc="val", leave=False)
-    for xb, yb in pbar:
-        xb = xb.to(device)
-        yb = yb.to(device)
+    for xb, yb in loader:
+        xb = xb.to(device, non_blocking=False)
+        yb = yb.to(device, non_blocking=False)
 
         logits = model(xb)
         loss = criterion(logits, yb)
 
         bs = yb.size(0)
-        acc = accuracy_top1(logits, yb)
+        total_loss += loss.item() * bs
+        total_correct += int((logits.argmax(dim=1) == yb).sum().item())
+        total_seen += int(bs)
 
-        loss_meter = loss_meter.update(float(loss.item()), bs)
-        acc_meter = acc_meter.update(acc, bs)
-
-        pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", acc=f"{acc_meter.avg:.4f}")
-
-    return EpochResult(loss=loss_meter.avg, acc=acc_meter.avg)
+    avg_loss = total_loss / total_seen if total_seen else 0.0
+    avg_acc = total_correct / total_seen if total_seen else 0.0
+    return EpochResult(loss=float(avg_loss), acc=float(avg_acc))

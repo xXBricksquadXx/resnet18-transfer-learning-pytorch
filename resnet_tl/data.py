@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Tuple, List
 
-from torchvision import transforms
+from torchvision import transforms as T
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 
@@ -20,30 +20,63 @@ class DataSpec:
     val_count: int
 
 
-def build_transforms(weights: ResNet18_Weights, train: bool) -> transforms.Compose:
-    # ResNet18 default is typically 224x224; use weights meta for mean/std.
-    mean = weights.meta["mean"]
-    std = weights.meta["std"]
+def _mean_std_from_weights(weights: ResNet18_Weights) -> tuple[list[float], list[float]]:
+    """
+    torchvision version differences:
+    - some versions expose mean/std via weights.meta
+    - others expose mean/std via weights.transforms() preset (preferred)
+    Fallback to standard ImageNet mean/std if we can't find them.
+    """
+    # 1) Try weights.meta if present
+    try:
+        meta = getattr(weights, "meta", {}) or {}
+        mean = meta.get("mean", None)
+        std = meta.get("std", None)
+        if mean is not None and std is not None:
+            return list(mean), list(std)
+    except Exception:
+        pass
+
+    # 2) Try weights.transforms() preset attributes (common in torchvision 0.15+)
+    try:
+        preset = weights.transforms()
+        if hasattr(preset, "mean") and hasattr(preset, "std"):
+            return list(preset.mean), list(preset.std)
+    except Exception:
+        pass
+
+    # 3) Try to locate a Normalize transform inside a Compose
+    try:
+        preset = weights.transforms()
+        transforms_list = getattr(preset, "transforms", None)
+        if transforms_list is None and isinstance(preset, T.Compose):
+            transforms_list = preset.transforms
+        if transforms_list:
+            for tr in transforms_list:
+                if isinstance(tr, T.Normalize):
+                    return list(tr.mean), list(tr.std)
+    except Exception:
+        pass
+
+    # 4) Fallback: standard ImageNet normalization
+    return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+
+
+def build_transforms(weights: ResNet18_Weights, train: bool):
+    mean, std = _mean_std_from_weights(weights)
 
     if train:
-        return transforms.Compose(
+        return T.Compose(
             [
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=mean, std=std),
+                T.RandomResizedCrop(224),
+                T.RandomHorizontalFlip(p=0.5),
+                T.ToTensor(),
+                T.Normalize(mean=mean, std=std),
             ]
         )
 
-    # Validation: deterministic transforms similar to weights.transforms()
-    return transforms.Compose(
-        [
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
+    # Validation: use the preset transform stack from the weights (most compatible)
+    return weights.transforms()
 
 
 def make_dataloaders(
@@ -67,7 +100,6 @@ def make_dataloaders(
     train_ds = ImageFolder(train_dir, transform=train_tfms)
     val_ds = ImageFolder(val_dir, transform=val_tfms)
 
-    # Safety: ensure val has same class->idx mapping
     if val_ds.class_to_idx != train_ds.class_to_idx:
         raise RuntimeError(
             f"class_to_idx mismatch between train and val.\n"
