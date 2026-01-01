@@ -28,13 +28,10 @@ This repo is intentionally small so you can iterate on:
 
 ## Baseline demo (screen recording)
 
-▶ **Baseline video:** [assets/test_run.mp4](assets/test_run.mp4)
-
-[![Watch the video](https://img.shields.io/badge/▶_Watch-Baseline_Video-blue?style=for-the-badge)](https://github.com/user-attachments/assets/84002fcb-69d6-42b0-ab9b-260f2c57e308)
+[![Watch the video](https://img.shields.io/badge/▶_Watch-Baseline_Video-blue?style=for-the-badge)](<[Phase 2 Test](https://github.com/user-attachments/assets/98184b0f-1932-4f23-bc38-ccc15c16c941)>)
 
 <div align="center">
-  <a href="https://github.com/user-attachments/assets/84002fcb-69d6-42b0-ab9b-260f2c57e308">
-  </a>
+  <a href="https://github.com/user-attachments/assets/98184b0f-1932-4f23-bc38-ccc15c16c941"></a>
 </div>
 
 Notes:
@@ -134,7 +131,7 @@ Total validation images: **32**
 
 ---
 
-## 3) Examine the pretrained model structure (the exact one we preserve)
+## 3) Examine the pretrained model structure
 
 This chapter demo preserves the canonical torchvision ResNet-18 backbone:
 
@@ -164,7 +161,7 @@ This is the simplest, most demo-friendly baseline:
 - track best checkpoint by validation accuracy
 - keep everything deterministic with a seed
 
-### One-shot demo (recommended for screen recording)
+### One-shot demo
 
 ```powershell
 ./scripts/test_run.ps1
@@ -245,7 +242,7 @@ For demos + inference, prefer:
 
 - `best_acc.pt`
 
-Baseline evidence:
+Baseline evidence (your run):
 
 - **Best checkpoint (by val accuracy):** epoch **6** → val_acc **1.0000** (32/32)
 - **Last epoch (epoch 10):** val_acc **0.9688** (31/32)
@@ -339,6 +336,111 @@ TOPK:
 ```
 
 Takeaway: pretrained ResNet-18 features are strong enough that a tiny head-only fine-tune converges quickly on CPU.
+
+---
+
+## 7b) Phase 2 results (unfreeze last stage: `layer4` + head)
+
+One-shot demo (Phase 2 script):
+
+```powershell
+./scripts/test_run_phase2.ps1
+```
+
+Run command (same as the script):
+
+```powershell
+python train.py `
+  --data-dir data `
+  --device cpu `
+  --epochs 10 `
+  --batch-size 16 `
+  --lr 0.0003 `
+  --weight-decay 0.0001 `
+  --freeze-backbone 1 `
+  --unfreeze-last 1 `
+  --unfreeze-all 0 `
+  --seed 1337 `
+  --num-workers 0 `
+  --amp 0
+```
+
+Logs + outputs:
+
+- Transcript: `logs/transcript_phase2_20251231_195717.txt`
+- Train log: `logs/train_phase2_20251231_195717.txt`
+- `RUN_DIR: runs/resnet18_20251231_195730`
+
+Model training scope:
+
+- trainable_params: **8,394,754** (fine-tuning `layer4` + `fc`)
+
+Best checkpoint:
+
+- best_acc: **1.0000** at epoch **5** → `runs/resnet18_20251231_195730/best_acc.pt`
+- best_loss (printed during training): **0.0074** at epoch **5** → `runs/resnet18_20251231_195730/best_loss.pt`
+- checkpoint metadata printed by the script:
+
+  - `best_val_loss 0.051396204904449405` (this is the value stored in the checkpoint header)
+
+Epoch lines (verbatim):
+
+```text
+EPOCH 1/10  train_loss=0.4554 train_acc=0.7250  val_loss=0.0945 val_acc=0.9688  lr=0.0003
+EPOCH 2/10  train_loss=0.0093 train_acc=1.0000  val_loss=0.0779 val_acc=0.9375  lr=0.0003
+EPOCH 3/10  train_loss=0.0080 train_acc=1.0000  val_loss=0.0854 val_acc=0.9062  lr=0.0003
+EPOCH 4/10  train_loss=0.1131 train_acc=0.9500  val_loss=0.0514 val_acc=0.9688  lr=0.0003
+EPOCH 5/10  train_loss=0.0013 train_acc=1.0000  val_loss=0.0074 val_acc=1.0000  lr=0.0003
+EPOCH 6/10  train_loss=0.0022 train_acc=1.0000  val_loss=0.0275 val_acc=1.0000  lr=0.0003
+EPOCH 7/10  train_loss=0.0037 train_acc=1.0000  val_loss=0.0620 val_acc=0.9688  lr=0.0003
+EPOCH 8/10  train_loss=0.0333 train_acc=0.9750  val_loss=0.0352 val_acc=0.9688  lr=0.0003
+EPOCH 9/10  train_loss=0.0305 train_acc=0.9750  val_loss=0.0206 val_acc=1.0000  lr=0.0003
+EPOCH 10/10  train_loss=0.0038 train_acc=1.0000  val_loss=0.0641 val_acc=0.9375  lr=0.0003
+```
+
+Takeaway: unfreezing `layer4` improves peak loss/accuracy quickly, but late-epoch validation drift still appears on small data—use the **best** checkpoint (epoch 5).
+
+### Phase 2 prediction sanity (best checkpoint)
+
+Using:
+
+- `runs/resnet18_20251231_195730/best_acc.pt` (best_epoch=5)
+
+Folder predictions:
+
+```text
+val/cat (first image):
+  1) cat  p=0.9999
+  2) fish p=0.0001
+
+val/fish (first image):
+  1) fish p=0.9999
+  2) cat  p=0.0001
+```
+
+Random sample from `data/val` (n=5):
+
+```text
+cat-challenge-009.png → cat  p=1.0000
+cat-challenge-012.png → cat  p=text
+val/cat (first image):
+  1) cat  p=0.9999
+  2) fish p=0.0001
+
+val/fish (first image):
+  1) fish p=0.9999
+  2) cat  p=0.0001
+```
+
+Random sample from `data/val` (n=5):
+
+```text
+cat-challenge-009.png → cat  p=1.0000
+cat-challenge-010.png → cat  p=1.0000
+cat-challenge-013.png → cat  p=1.0000
+fish-challenge-010.png → fish p=1.0000
+cat-challenge-002.png → cat  p=0.9889
+```
 
 ---
 
