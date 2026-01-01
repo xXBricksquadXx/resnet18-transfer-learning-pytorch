@@ -28,7 +28,7 @@ This repo is intentionally small so you can iterate on:
 
 ## Baseline demo (screen recording)
 
-[![Watch the video](https://img.shields.io/badge/▶_Watch-Baseline_Video-blue?style=for-the-badge)](<[Phase 2 Test](https://github.com/user-attachments/assets/98184b0f-1932-4f23-bc38-ccc15c16c941)>)
+[![Watch the video](https://img.shields.io/badge/▶_Watch-Baseline_Video-blue?style=for-the-badge)](<[assets/phase2_tests.mp4](https://github.com/user-attachments/assets/98184b0f-1932-4f23-bc38-ccc15c16c941)>)
 
 <div align="center">
   <a href="https://github.com/user-attachments/assets/98184b0f-1932-4f23-bc38-ccc15c16c941"></a>
